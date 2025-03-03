@@ -5,6 +5,8 @@ const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY); // Initialize S
 const app = express();
 app.use(express.json()); // Parse JSON bodies
 
+app.use(express.static("public"));
+
 // Route to create a payment intent
 app.post("/create-payment-intent", async (req, res) => {
   try {
