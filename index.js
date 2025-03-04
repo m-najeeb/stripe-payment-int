@@ -1,56 +1,89 @@
-require("dotenv").config(); // Load environment variables
+// Load environment variables from .env file
+require("dotenv").config();
+
+// Import required dependencies
 const express = require("express");
-const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY); // Initialize Stripe with secret key
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 
+// Initialize Express application
 const app = express();
-app.use(express.json()); // Parse JSON bodies
 
-app.use(express.static("public"));
+// Middleware setup
+app.use(express.json()); // Enable JSON body parsing
+app.use(express.static("public")); // Serve static files from 'public' directory
 
-// Route to create a payment intent
+// Constants
+const MINIMUM_AMOUNT_CENTS = 50; // Stripe's minimum transaction amount in cents ($0.50 USD)
+const DEFAULT_PORT = 5000;
+
+/**
+ * Validates the payment amount received from the request
+ * @param {number|string} amount - The amount to validate
+ * @returns {object|null} - Error object if invalid, null if valid
+ */
+const validatePaymentAmount = (amount) => {
+  if (!amount || isNaN(amount) || amount <= 0) {
+    return {
+      status: 400,
+      message: "Invalid amount. Please provide a positive number.",
+    };
+  }
+
+  const amountInCents = Math.round(parseFloat(amount) * 100);
+  if (amountInCents < MINIMUM_AMOUNT_CENTS) {
+    return { status: 400, message: "Amount must be at least $0.50 USD." };
+  }
+
+  return { amountInCents }; // Return validated amount in cents
+};
+
+/**
+ * Creates a Stripe PaymentIntent
+ * @param {number} amountInCents - Amount in cents
+ * @returns {Promise<object>} - Stripe PaymentIntent object
+ */
+const createStripePaymentIntent = async (amountInCents) => {
+  return stripe.paymentIntents.create({
+    amount: amountInCents,
+    currency: "usd",
+    payment_method_types: ["card"],
+  });
+};
+
+// Route to handle PaymentIntent creation
 app.post("/create-payment-intent", async (req, res) => {
   try {
     const { amount } = req.body;
 
-    // Validate input
-    if (!amount || isNaN(amount) || amount <= 0) {
-      return res
-        .status(400)
-        .json({ error: "Invalid amount. Please provide a positive number." });
+    // Validate the payment amount
+    const validation = validatePaymentAmount(amount);
+    if (validation.status) {
+      return res.status(validation.status).json({ error: validation.message });
     }
 
-    const amountInCents = Math.round(parseFloat(amount) * 100); // Convert to cents
-    if (amountInCents < 50) {
-      // Stripe minimum amount is typically 50 cents in USD
-      return res
-        .status(400)
-        .json({ error: "Amount must be at least $0.50 USD." });
-    }
+    // Create PaymentIntent with validated amount
+    const paymentIntent = await createStripePaymentIntent(
+      validation.amountInCents
+    );
 
-    // Create a PaymentIntent with the specified amount and currency
-    const paymentIntent = await stripe.paymentIntents.create({
-      amount: amountInCents,
-      currency: "usd",
-      payment_method_types: ["card"],
-    });
-
-    // Send the client secret and additional info to the frontend
+    // Send successful response with PaymentIntent details
     res.status(200).json({
       clientSecret: paymentIntent.client_secret,
       amount: amount,
-      paymentIntentId: paymentIntent.id, // Useful for tracking
+      paymentIntentId: paymentIntent.id,
     });
   } catch (error) {
-    console.error("Error creating payment intent:", error.message);
+    // Log and return error details
+    console.error("PaymentIntent creation error:", error.message);
     res.status(500).json({
-      error: "Payment intent creation failed",
+      error: "Failed to create PaymentIntent",
       details: error.message,
     });
   }
 });
 
 // Start the server
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+const port = process.env.PORT || DEFAULT_PORT;
+app.listen(port, () => {
+  console.log(`Server is running on port ${port}`);
 });
